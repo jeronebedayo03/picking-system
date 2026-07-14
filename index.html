@@ -7275,6 +7275,51 @@
         updateSaveButtonState();
         loadOpCards();
     </script>
+    import { getDatabase, ref, push, set, onValue } from "firebase/database";
+
+// Kunin ang database instance
+const db = getDatabase();
+
+// 1. Taga-save ng bagong card kapag may nag-click ng button
+export function saveCard(cardTitle, cardContent, userName) {
+  // Ituro ang path kung saan natin isasave ang mga cards
+  const cardsRef = ref(db, 'saved_cards');
+  
+  // Gumawa ng bagong natatanging key (unique ID) para sa card
+  const newCardRef = push(cardsRef);
+  
+  // Isulat ang detalye ng card sa database
+  set(newCardRef, {
+    title: cardTitle,
+    content: cardContent,
+    savedBy: userName,
+    timestamp: Date.now()
+  })
+  .then(() => {
+    console.log("Card successfully saved!");
+  })
+  .catch((error) => {
+    console.error("Error saving card: ", error);
+  });
+}
+
+// 2. Realtime Listener para makita agad ng ibang users ang bawat bagong card
+const cardsRef = ref(db, 'saved_cards');
+onValue(cardsRef, (snapshot) => {
+  const data = snapshot.val();
+  
+  // Kung may data, i-update ang listahan sa inyong web screen
+  if (data) {
+    updateUI(data);
+  }
+});
+
+// Simpleng helper function para i-render ang mga cards sa iyong HTML
+function updateUI(cardsObject) {
+  console.log("May bagong card list na natanggap!", cardsObject);
+  // Dito mo isusulat ang DOM manipulation para ipakita ang mga cards sa iyong webpage
+}
+
     <script type="module">
   // Import the functions you need from the SDKs you need
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
