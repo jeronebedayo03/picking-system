@@ -7275,70 +7275,262 @@
         updateSaveButtonState();
         loadOpCards();
     </script>
-    <script>
-    import { getDatabase, ref, push, set, onValue } from "firebase/database";
 
-// Kunin ang database instance
-const db = getDatabase();
-
-// 1. Taga-save ng bagong card kapag may nag-click ng button
-export function saveCard(cardTitle, cardContent, userName) {
-  // Ituro ang path kung saan natin isasave ang mga cards
-  const cardsRef = ref(db, 'saved_cards');
-  
-  // Gumawa ng bagong natatanging key (unique ID) para sa card
-  const newCardRef = push(cardsRef);
-  
-  // Isulat ang detalye ng card sa database
-  set(newCardRef, {
-    title: cardTitle,
-    content: cardContent,
-    savedBy: userName,
-    timestamp: Date.now()
-  })
-  .then(() => {
-    console.log("Card successfully saved!");
-  })
-  .catch((error) => {
-    console.error("Error saving card: ", error);
-  });
-}
-
-// 2. Realtime Listener para makita agad ng ibang users ang bawat bagong card
-const cardsRef = ref(db, 'saved_cards');
-onValue(cardsRef, (snapshot) => {
-  const data = snapshot.val();
-  
-  // Kung may data, i-update ang listahan sa inyong web screen
-  if (data) {
-    updateUI(data);
-  }
-});
-
-// Simpleng helper function para i-render ang mga cards sa iyong HTML
-function updateUI(cardsObject) {
-  console.log("May bagong card list na natanggap!", cardsObject);
-  // Dito mo isusulat ang DOM manipulation para ipakita ang mga cards sa iyong webpage
-}
-</script>
+    <!-- ============================================================
+    FIREBASE MODULE – REAL-TIME SYNC FOR SAVED CARDS
+    ============================================================ -->
     <script type="module">
-  // Import the functions you need from the SDKs you need
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
-  // TODO: Add SDKs for Firebase products that you want to use
-  // https://firebase.google.com/docs/web/setup#available-libraries
+        // ------------------------------------------------
+        //  FIREBASE INITIALIZATION
+        // ------------------------------------------------
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+        import { getDatabase, ref, push, set, onValue, remove, get, child } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js";
 
-  // Your web app's Firebase configuration
-  const firebaseConfig = {
-    apiKey: "AIzaSyBoWO-4AMLVrpAS2HXKCPiUUCVfVuIyVCk",
-    authDomain: "picking-system-bcc4a.firebaseapp.com",
-    projectId: "picking-system-bcc4a",
-    storageBucket: "picking-system-bcc4a.firebasestorage.app",
-    messagingSenderId: "930194414222",
-    appId: "1:930194414222:web:db142a963ef010bdbf87df"
-  };
+        const firebaseConfig = {
+            apiKey: "AIzaSyBoWO-4AMLVrpAS2HXKCPiUUCVfVuIyVCk",
+            authDomain: "picking-system-bcc4a.firebaseapp.com",
+            projectId: "picking-system-bcc4a",
+            storageBucket: "picking-system-bcc4a.firebasestorage.app",
+            messagingSenderId: "930194414222",
+            appId: "1:930194414222:web:db142a963ef010bdbf87df"
+        };
 
-  // Initialize Firebase
-  const app = initializeApp(firebaseConfig);
-</script>
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const CARDS_PATH = 'saved_cards';
+
+        // ------------------------------------------------
+        //  FIREBASE HELPERS
+        // ------------------------------------------------
+        function getCardsRef() {
+            return ref(db, CARDS_PATH);
+        }
+
+        function getCardRef(cardId) {
+            return ref(db, CARDS_PATH + '/' + cardId);
+        }
+
+        // ------------------------------------------------
+        //  SAVE CARDS TO FIREBASE
+        // ------------------------------------------------
+        async function saveCardsToFirebase(cards) {
+            if (!cards || !cards.length) return;
+
+            try {
+                // Save each card individually by its id
+                for (const card of cards) {
+                    if (!card.id) continue;
+                    const cardRef = getCardRef(card.id);
+                    await set(cardRef, {
+                        id: card.id,
+                        title: card.title || 'Untitled',
+                        data: card.data || [],
+                        timestamp: Date.now()
+                    });
+                }
+                console.log('[Firebase] ✅ Cards synced successfully.');
+            } catch (err) {
+                console.error('[Firebase] ❌ Error saving cards:', err);
+            }
+        }
+
+        // ------------------------------------------------
+        //  DELETE CARD FROM FIREBASE
+        // ------------------------------------------------
+        async function deleteCardFromFirebase(cardId) {
+            if (!cardId) return;
+            try {
+                const cardRef = getCardRef(cardId);
+                await remove(cardRef);
+                console.log('[Firebase] ✅ Card deleted:', cardId);
+            } catch (err) {
+                console.error('[Firebase] ❌ Error deleting card:', err);
+            }
+        }
+
+        // ------------------------------------------------
+        //  LOAD CARDS FROM FIREBASE (one-time)
+        // ------------------------------------------------
+        async function loadCardsFromFirebase() {
+            try {
+                const snapshot = await get(getCardsRef());
+                const data = snapshot.val();
+                if (!data) return [];
+
+                const cards = Object.values(data);
+                console.log('[Firebase] 📥 Loaded', cards.length, 'cards from Firebase.');
+                return cards;
+            } catch (err) {
+                console.error('[Firebase] ❌ Error loading cards:', err);
+                return [];
+            }
+        }
+
+        // ------------------------------------------------
+        //  REAL-TIME LISTENER
+        // ------------------------------------------------
+        let isSyncing = false;
+
+        function listenToFirebaseChanges() {
+            onValue(getCardsRef(), async (snapshot) => {
+                if (isSyncing) return;
+                isSyncing = true;
+
+                try {
+                    const data = snapshot.val();
+                    const firebaseCards = data ? Object.values(data) : [];
+
+                    // Get local cards
+                    const localCards = JSON.parse(localStorage.getItem('op_cards') || '[]');
+
+                    // Merge: Firebase wins (newer timestamp)
+                    const merged = mergeCards(localCards, firebaseCards);
+
+                    // Save merged to localStorage
+                    localStorage.setItem('op_cards', JSON.stringify(merged));
+
+                    // Trigger UI refresh if the function exists
+                    if (typeof window.loadOpCards === 'function') {
+                        window.loadOpCards();
+                    }
+
+                    console.log('[Firebase] 🔄 Real-time sync complete. Total cards:', merged.length);
+                } catch (err) {
+                    console.error('[Firebase] ❌ Error in real-time listener:', err);
+                } finally {
+                    isSyncing = false;
+                }
+            });
+        }
+
+        // ------------------------------------------------
+        //  MERGE HELPER
+        // ------------------------------------------------
+        function mergeCards(local, remote) {
+            const map = {};
+
+            // Add local cards
+            local.forEach(c => {
+                if (c.id) map[c.id] = { ...c, _source: 'local' };
+            });
+
+            // Add/overwrite with remote cards
+            remote.forEach(c => {
+                if (c.id) {
+                    const existing = map[c.id];
+                    // Remote wins if it has newer timestamp or local doesn't exist
+                    if (!existing || (c.timestamp || 0) > (existing.timestamp || 0)) {
+                        map[c.id] = { ...c, _source: 'remote' };
+                    }
+                }
+            });
+
+            // Return as array, sorted by timestamp (newest first)
+            return Object.values(map).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        }
+
+        // ------------------------------------------------
+        //  WRAP / OVERRIDE saveOpCards TO SYNC TO FIREBASE
+        // ------------------------------------------------
+        // We'll hook into the existing saveOpCards function by
+        // wrapping it. This preserves the original behavior.
+        const originalSaveOpCards = window.saveOpCards;
+
+        window.saveOpCards = function() {
+            // Call the original function first
+            if (typeof originalSaveOpCards === 'function') {
+                originalSaveOpCards();
+            }
+
+            // After saving, sync to Firebase
+            try {
+                const cards = JSON.parse(localStorage.getItem('op_cards') || '[]');
+                if (cards.length) {
+                    saveCardsToFirebase(cards);
+                }
+            } catch (err) {
+                console.error('[Firebase] ❌ Error syncing after save:', err);
+            }
+        };
+
+        // ------------------------------------------------
+        //  WRAP deleteOpCard TO ALSO DELETE FROM FIREBASE
+        // ------------------------------------------------
+        const originalDeleteOpCard = window.deleteOpCard;
+
+        window.deleteOpCard = async function(id) {
+            // First, delete from Firebase
+            await deleteCardFromFirebase(id);
+
+            // Then call the original function
+            if (typeof originalDeleteOpCard === 'function') {
+                originalDeleteOpCard(id);
+            }
+
+            // Refresh the list
+            if (typeof window.loadOpCards === 'function') {
+                setTimeout(() => window.loadOpCards(), 100);
+            }
+        };
+
+        // ------------------------------------------------
+        //  INIT: load from Firebase on startup
+        // ------------------------------------------------
+        async function initFirebase() {
+            try {
+                // Load cards from Firebase
+                const firebaseCards = await loadCardsFromFirebase();
+
+                if (firebaseCards.length) {
+                    // Merge with local
+                    const localCards = JSON.parse(localStorage.getItem('op_cards') || '[]');
+                    const merged = mergeCards(localCards, firebaseCards);
+                    localStorage.setItem('op_cards', JSON.stringify(merged));
+                    console.log('[Firebase] ✅ Initial sync complete. Cards merged:', merged.length);
+                }
+
+                // Start real-time listener
+                listenToFirebaseChanges();
+
+                // Refresh UI
+                if (typeof window.loadOpCards === 'function') {
+                    window.loadOpCards();
+                }
+
+                // Also refresh additional and sticker tabs if they have load functions
+                if (typeof window.loadOpCards === 'function') {
+                    // Just trigger a UI update
+                    setTimeout(() => {
+                        if (typeof window.loadOpCards === 'function') {
+                            window.loadOpCards();
+                        }
+                    }, 300);
+                }
+            } catch (err) {
+                console.error('[Firebase] ❌ Init error:', err);
+            }
+        }
+
+        // ------------------------------------------------
+        //  EXPOSE FUNCTIONS GLOBALLY
+        // ------------------------------------------------
+        window.saveCardsToFirebase = saveCardsToFirebase;
+        window.loadCardsFromFirebase = loadCardsFromFirebase;
+        window.deleteCardFromFirebase = deleteCardFromFirebase;
+        window.listenToFirebaseChanges = listenToFirebaseChanges;
+
+        // ------------------------------------------------
+        //  START
+        // ------------------------------------------------
+        // Wait for the page to fully load before initializing
+        if (document.readyState === 'complete') {
+            initFirebase();
+        } else {
+            window.addEventListener('load', initFirebase);
+        }
+
+        console.log('[Firebase] 🚀 Firebase module loaded successfully.');
+    </script>
+
 </body>
 </html>
