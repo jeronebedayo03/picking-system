@@ -7275,6 +7275,7 @@
         updateSaveButtonState();
         loadOpCards();
     </script>
+    <script>
     import { getDatabase, ref, push, set, onValue } from "firebase/database";
 
 // Kunin ang database instance
@@ -7319,7 +7320,7 @@ function updateUI(cardsObject) {
   console.log("May bagong card list na natanggap!", cardsObject);
   // Dito mo isusulat ang DOM manipulation para ipakita ang mga cards sa iyong webpage
 }
-
+</script>
     <script type="module">
   // Import the functions you need from the SDKs you need
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
